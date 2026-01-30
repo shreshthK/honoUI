@@ -2,25 +2,19 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 interface ShortenedUrl {
-  original: string
-  short: string
+  code: string
+  shortUrl: string
+  originalUrl: string
+  expiresAt: string | null
 }
 
 export default function Home() {
   const [url, setUrl] = useState('')
   const [shortenedUrl, setShortenedUrl] = useState<ShortenedUrl | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
-
-  const generateShortUrl = () => {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-    let result = ''
-    for (let i = 0; i < 6; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length))
-    }
-    return `snp.it/${result}`
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -29,19 +23,35 @@ export default function Home() {
     setIsLoading(true)
     setShortenedUrl(null)
     setShowSuccess(false)
+    setError(null)
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 800))
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/links`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url }),
+      })
 
-    const newShortUrl = generateShortUrl()
-    setShortenedUrl({ original: url, short: newShortUrl })
-    setShowSuccess(true)
-    setIsLoading(false)
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to shorten URL')
+      }
+
+      const data: ShortenedUrl = await response.json()
+      setShortenedUrl(data)
+      setShowSuccess(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const copyToClipboard = async () => {
     if (shortenedUrl) {
-      await navigator.clipboard.writeText(`https://${shortenedUrl.short}`)
+      await navigator.clipboard.writeText(shortenedUrl.shortUrl)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
@@ -105,32 +115,51 @@ export default function Home() {
           </button>
         </form>
 
+        {/* Error */}
+        {error && (
+          <div className="mt-8 bg-red-50 border-2 border-red-300 rounded-2xl p-5 text-red-600 font-mono">
+            {error}
+          </div>
+        )}
+
         {/* Result */}
         {shortenedUrl && (
           <div className={`mt-8 ${showSuccess ? 'success-bounce' : ''}`}>
-            <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-[var(--primary-purple)] rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="text-[var(--primary-green)] text-2xl">
-                  <CheckIcon />
-                </span>
-                <span className="font-mono text-lg md:text-xl text-[var(--text-primary)]">
-                  https://<span className="text-[var(--primary-pink)] font-bold">{shortenedUrl.short}</span>
-                </span>
+            <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-[var(--primary-purple)] rounded-2xl p-5">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-[var(--primary-green)] text-2xl">
+                    <CheckIcon />
+                  </span>
+                  <span className="font-mono text-lg md:text-xl text-[var(--text-primary)]">
+                    <span className="text-[var(--primary-pink)] font-bold">{shortenedUrl.shortUrl}</span>
+                  </span>
+                </div>
+                <button
+                  onClick={copyToClipboard}
+                  className="copy-btn flex items-center gap-2 bg-white hover:bg-gray-50 px-5 py-3 rounded-xl font-mono text-sm border border-gray-200"
+                >
+                  {copied ? (
+                    <>
+                      <CheckIcon /> Copied!
+                    </>
+                  ) : (
+                    <>
+                      <CopyIcon /> Copy
+                    </>
+                  )}
+                </button>
               </div>
-              <button
-                onClick={copyToClipboard}
-                className="copy-btn flex items-center gap-2 bg-white hover:bg-gray-50 px-5 py-3 rounded-xl font-mono text-sm border border-gray-200"
-              >
-                {copied ? (
-                  <>
-                    <CheckIcon /> Copied!
-                  </>
-                ) : (
-                  <>
-                    <CopyIcon /> Copy
-                  </>
-                )}
-              </button>
+              <div className="mt-4 pt-4 border-t border-purple-200">
+                <Link
+                  to={`/stats/${shortenedUrl.code}`}
+                  className="inline-flex items-center gap-2 text-[var(--primary-purple)] hover:text-[var(--primary-pink)] font-mono text-sm transition-colors"
+                >
+                  <ChartIcon />
+                  View Stats for this link
+                  <ArrowRightIcon />
+                </Link>
+              </div>
             </div>
           </div>
         )}
@@ -143,7 +172,7 @@ export default function Home() {
           className="inline-flex items-center gap-2 text-[var(--primary-purple)] hover:text-[var(--primary-pink)] font-mono transition-colors"
         >
           <ChartIcon />
-          View Global Statistics
+          Look Up Link Statistics
           <ArrowRightIcon />
         </Link>
       </div>
