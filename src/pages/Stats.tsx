@@ -1,39 +1,32 @@
-import { Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 
-interface ShortenedUrl {
+interface LinkStats {
+  code: string
+  originalUrl: string
+  createdAt: string
+  expiresAt: string | null
+  clickCount: number
+}
+
+interface ClickEvent {
   id: string
-  original: string
-  short: string
+  linkId: string
+  clickedAt: string
+  userAgent: string | null
+  referer: string | null
+  ipHash: string | null
+}
+
+interface EventsResponse {
+  code: string
+  events: ClickEvent[]
+}
+
+interface DayClicks {
+  day: string
+  date: string
   clicks: number
-}
-
-interface Stats {
-  totalUrls: number
-  totalClicks: number
-  topUrls: ShortenedUrl[]
-  clicksPerDay: { day: string; clicks: number }[]
-}
-
-// Mock data for demonstration
-const stats: Stats = {
-  totalUrls: 1247,
-  totalClicks: 48392,
-  topUrls: [
-    { id: '1', original: 'https://github.com/anthropics/claude-code', short: 'snp.it/abc123', clicks: 8472 },
-    { id: '2', original: 'https://docs.anthropic.com/claude', short: 'snp.it/xyz789', clicks: 6234 },
-    { id: '3', original: 'https://react.dev/learn', short: 'snp.it/rct001', clicks: 4891 },
-    { id: '4', original: 'https://tailwindcss.com/docs', short: 'snp.it/tw2024', clicks: 3456 },
-    { id: '5', original: 'https://vitejs.dev/guide', short: 'snp.it/vte999', clicks: 2187 },
-  ],
-  clicksPerDay: [
-    { day: 'Mon', clicks: 4200 },
-    { day: 'Tue', clicks: 5800 },
-    { day: 'Wed', clicks: 7200 },
-    { day: 'Thu', clicks: 6100 },
-    { day: 'Fri', clicks: 8900 },
-    { day: 'Sat', clicks: 5400 },
-    { day: 'Sun', clicks: 4800 },
-  ]
 }
 
 const barColors = [
@@ -47,17 +40,97 @@ const barColors = [
 ]
 
 export default function StatsPage() {
-  const maxClicks = Math.max(...stats.clicksPerDay.map(d => d.clicks))
+  const { code: urlCode } = useParams<{ code: string }>()
+  const navigate = useNavigate()
+  const [inputCode, setInputCode] = useState(urlCode || '')
+  const [linkStats, setLinkStats] = useState<LinkStats | null>(null)
+  const [events, setEvents] = useState<ClickEvent[]>([])
+  const [clicksPerDay, setClicksPerDay] = useState<DayClicks[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (urlCode) {
+      setInputCode(urlCode)
+      fetchStats(urlCode)
+    }
+  }, [urlCode])
+
+  const fetchStats = async (code: string) => {
+    setIsLoading(true)
+    setError(null)
+    setLinkStats(null)
+    setEvents([])
+    setClicksPerDay([])
+
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL
+      const [statsResponse, eventsResponse] = await Promise.all([
+        fetch(`${apiUrl}/api/links/${code}`),
+        fetch(`${apiUrl}/api/links/${code}/events`),
+      ])
+
+      if (!statsResponse.ok) {
+        const errorData = await statsResponse.json()
+        throw new Error(errorData.error || 'Link not found')
+      }
+
+      const stats: LinkStats = await statsResponse.json()
+      setLinkStats(stats)
+
+      if (eventsResponse.ok) {
+        const eventsData: EventsResponse = await eventsResponse.json()
+        setEvents(eventsData.events)
+        setClicksPerDay(aggregateClicksByDay(eventsData.events))
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const aggregateClicksByDay = (events: ClickEvent[]): DayClicks[] => {
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const clicksByDate: Record<string, number> = {}
+
+    events.forEach((event) => {
+      const date = new Date(event.clickedAt).toISOString().split('T')[0]
+      clicksByDate[date] = (clicksByDate[date] || 0) + 1
+    })
+
+    const sortedDates = Object.keys(clicksByDate).sort()
+    const last7Days = sortedDates.slice(-7)
+
+    return last7Days.map((date) => {
+      const d = new Date(date)
+      return {
+        day: dayNames[d.getDay()],
+        date,
+        clicks: clicksByDate[date],
+      }
+    })
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!inputCode.trim()) return
+    navigate(`/stats/${inputCode.trim()}`)
+  }
+
+  const maxClicks = clicksPerDay.length > 0
+    ? Math.max(...clicksPerDay.map((d) => d.clicks))
+    : 0
 
   return (
     <div className="page-enter">
       {/* Header */}
       <div className="text-center mb-12">
         <h1 className="font-display text-4xl md:text-5xl lg:text-6xl gradient-text mb-4">
-          Global Statistics
+          Link Statistics
         </h1>
         <p className="text-[var(--text-secondary)] font-mono">
-          Real-time insights into link performance
+          View detailed analytics for your shortened links
         </p>
       </div>
 
@@ -70,145 +143,214 @@ export default function StatsPage() {
         Back to Shortener
       </Link>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-        <StatCard
-          icon={<LinkIcon />}
-          label="Total URLs Shortened"
-          value={stats.totalUrls.toLocaleString()}
-          color="pink"
-        />
-        <StatCard
-          icon={<ClickIcon />}
-          label="Total Clicks"
-          value={stats.totalClicks.toLocaleString()}
-          color="cyan"
-        />
-      </div>
-
-      {/* Click Trends Chart */}
+      {/* Search Form */}
       <div className="card p-6 md:p-8 mb-10">
-        <h2 className="font-display text-2xl md:text-3xl text-[var(--primary-purple)] mb-8">
-          Weekly Click Trends
-        </h2>
-        <div className="flex items-end justify-between gap-3 md:gap-6 h-56 md:h-72">
-          {stats.clicksPerDay.map((day, index) => (
-            <div key={day.day} className="flex-1 flex flex-col items-center gap-3 h-full">
-              <div className="flex-1 w-full flex items-end">
-                <div
-                  className="w-full chart-bar relative group cursor-pointer"
-                  style={{
-                    height: `${(day.clicks / maxClicks) * 100}%`,
-                    background: barColors[index],
-                    boxShadow: '0 4px 15px -3px rgba(0,0,0,0.1)',
-                  }}
-                >
-                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-white px-3 py-1.5 rounded-lg text-sm font-mono opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg border border-gray-100">
-                    {day.clicks.toLocaleString()}
+        <form onSubmit={handleSubmit} className="flex flex-col md:flex-row gap-4">
+          <div className="flex-1">
+            <label className="block text-[var(--primary-purple)] font-mono text-sm mb-2 font-semibold">
+              ENTER LINK CODE
+            </label>
+            <input
+              type="text"
+              value={inputCode}
+              onChange={(e) => setInputCode(e.target.value)}
+              placeholder="e.g., abc123"
+              className="input-field w-full px-5 py-4 text-[var(--text-primary)] font-mono"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="btn-primary px-8 py-4 rounded-xl font-mono self-end disabled:opacity-50"
+          >
+            {isLoading ? 'Loading...' : 'Look Up'}
+          </button>
+        </form>
+      </div>
+
+      {/* Error State */}
+      {error && (
+        <div className="card p-6 mb-10 bg-red-50 border-red-200">
+          <p className="text-red-600 font-mono text-center">{error}</p>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {isLoading && (
+        <div className="card p-12 text-center">
+          <div className="inline-block animate-spin text-[var(--primary-purple)]">
+            <SpinnerIcon />
+          </div>
+          <p className="mt-4 text-[var(--text-secondary)] font-mono">Loading statistics...</p>
+        </div>
+      )}
+
+      {/* Stats Display */}
+      {linkStats && !isLoading && (
+        <>
+          {/* Link Info Card */}
+          <div className="card p-6 md:p-8 mb-10">
+            <h2 className="font-display text-2xl text-[var(--primary-purple)] mb-6">
+              Link Details
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <span className="font-mono text-sm text-[var(--text-secondary)]">Short URL</span>
+                <p className="font-mono text-lg text-[var(--primary-pink)] font-semibold">
+                  /{linkStats.code}
+                </p>
+              </div>
+              <div>
+                <span className="font-mono text-sm text-[var(--text-secondary)]">Original URL</span>
+                <p className="font-mono text-base text-[var(--text-primary)] break-all">
+                  {linkStats.originalUrl}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-6">
+                <div>
+                  <span className="font-mono text-sm text-[var(--text-secondary)]">Created</span>
+                  <p className="font-mono text-base text-[var(--text-primary)]">
+                    {new Date(linkStats.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+                {linkStats.expiresAt && (
+                  <div>
+                    <span className="font-mono text-sm text-[var(--text-secondary)]">Expires</span>
+                    <p className="font-mono text-base text-[var(--text-primary)]">
+                      {new Date(linkStats.expiresAt).toLocaleDateString()}
+                    </p>
                   </div>
-                </div>
+                )}
               </div>
-              <span className="font-mono text-sm text-[var(--text-secondary)]">{day.day}</span>
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      {/* Top URLs */}
-      <div className="card p-6 md:p-8">
-        <h2 className="font-display text-2xl md:text-3xl text-[var(--primary-orange)] mb-8 flex items-center gap-3">
-          <TrophyIcon /> Top Performers
-        </h2>
-        <div className="space-y-4">
-          {stats.topUrls.map((item, index) => (
-            <div
-              key={item.id}
-              className="link-item bg-white rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3"
-            >
-              <div className="flex items-center gap-4">
-                <span className={`font-display text-2xl ${getRankColor(index)}`}>
-                  #{index + 1}
-                </span>
-                <div className="min-w-0">
-                  <p className="font-mono text-[var(--primary-purple)] text-sm md:text-base font-semibold">
-                    {item.short}
-                  </p>
-                  <p className="font-mono text-[var(--text-secondary)] text-xs md:text-sm truncate max-w-xs md:max-w-md">
-                    {item.original}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 font-mono text-[var(--primary-pink)] ml-10 md:ml-0">
+          {/* Stats Card */}
+          <div className="card p-6 md:p-8 mb-10 bg-gradient-to-br from-cyan-50 to-blue-50 border-cyan-200">
+            <div className="flex items-center gap-4 mb-4">
+              <span className="text-3xl text-[var(--primary-cyan)]">
                 <ClickIcon />
-                <span className="text-lg md:text-xl font-bold">{item.clicks.toLocaleString()}</span>
+              </span>
+              <span className="font-mono text-[var(--text-secondary)] text-sm tracking-wide">
+                Total Clicks
+              </span>
+            </div>
+            <p className="font-display text-5xl md:text-6xl text-[var(--primary-cyan)]">
+              {linkStats.clickCount.toLocaleString()}
+            </p>
+          </div>
+
+          {/* Click Trends Chart */}
+          {clicksPerDay.length > 0 && (
+            <div className="card p-6 md:p-8 mb-10">
+              <h2 className="font-display text-2xl md:text-3xl text-[var(--primary-purple)] mb-8">
+                Click Trends
+              </h2>
+              <div className="flex items-end justify-between gap-3 md:gap-6 h-56 md:h-72">
+                {clicksPerDay.map((day, index) => (
+                  <div key={day.date} className="flex-1 flex flex-col items-center gap-3 h-full">
+                    <div className="flex-1 w-full flex items-end">
+                      <div
+                        className="w-full chart-bar relative group cursor-pointer rounded-t-lg"
+                        style={{
+                          height: `${maxClicks > 0 ? (day.clicks / maxClicks) * 100 : 0}%`,
+                          minHeight: day.clicks > 0 ? '8px' : '0',
+                          background: barColors[index % barColors.length],
+                          boxShadow: '0 4px 15px -3px rgba(0,0,0,0.1)',
+                        }}
+                      >
+                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-white px-3 py-1.5 rounded-lg text-sm font-mono opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg border border-gray-100">
+                          {day.clicks.toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="font-mono text-sm text-[var(--text-secondary)]">{day.day}</span>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
+          )}
+
+          {/* Recent Events */}
+          {events.length > 0 && (
+            <div className="card p-6 md:p-8">
+              <h2 className="font-display text-2xl md:text-3xl text-[var(--primary-orange)] mb-8">
+                Recent Clicks
+              </h2>
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {events.slice(0, 20).map((event) => (
+                  <div
+                    key={event.id}
+                    className="bg-white rounded-xl p-4 border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-2"
+                  >
+                    <div className="font-mono text-sm text-[var(--text-primary)]">
+                      {new Date(event.clickedAt).toLocaleString()}
+                    </div>
+                    <div className="flex flex-wrap gap-4 text-xs font-mono text-[var(--text-secondary)]">
+                      {event.referer && (
+                        <span className="truncate max-w-xs" title={event.referer}>
+                          From: {event.referer}
+                        </span>
+                      )}
+                      {event.userAgent && (
+                        <span className="truncate max-w-xs" title={event.userAgent}>
+                          {parseUserAgent(event.userAgent)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Empty State for Events */}
+          {events.length === 0 && (
+            <div className="card p-8 text-center">
+              <p className="text-[var(--text-secondary)] font-mono">
+                No click events recorded yet. Share your link to start tracking!
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Empty State */}
+      {!linkStats && !isLoading && !error && !urlCode && (
+        <div className="card p-12 text-center">
+          <div className="text-6xl mb-6">
+            <ChartIcon />
+          </div>
+          <p className="text-[var(--text-secondary)] font-mono">
+            Enter a link code above to view its statistics
+          </p>
         </div>
-      </div>
+      )}
     </div>
   )
 }
 
-function getRankColor(index: number): string {
-  switch (index) {
-    case 0: return 'text-yellow-500'
-    case 1: return 'text-gray-400'
-    case 2: return 'text-amber-600'
-    default: return 'text-gray-300'
-  }
-}
-
-// Stat Card Component
-function StatCard({ icon, label, value, color }: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  color: 'pink' | 'cyan'
-}) {
-  const gradients = {
-    pink: 'from-pink-50 to-purple-50 border-pink-200',
-    cyan: 'from-cyan-50 to-blue-50 border-cyan-200',
-  }
-  const textColors = {
-    pink: 'text-[var(--primary-pink)]',
-    cyan: 'text-[var(--primary-cyan)]',
-  }
-
-  return (
-    <div className={`stat-card card p-6 md:p-8 bg-gradient-to-br ${gradients[color]}`}>
-      <div className="flex items-center gap-4 mb-4">
-        <span className={`text-3xl ${textColors[color]}`}>{icon}</span>
-        <span className="font-mono text-[var(--text-secondary)] text-sm tracking-wide">{label}</span>
-      </div>
-      <p className={`font-display text-4xl md:text-5xl ${textColors[color]}`}>
-        {value}
-      </p>
-    </div>
-  )
+function parseUserAgent(ua: string): string {
+  if (ua.includes('Chrome')) return 'Chrome'
+  if (ua.includes('Firefox')) return 'Firefox'
+  if (ua.includes('Safari')) return 'Safari'
+  if (ua.includes('Edge')) return 'Edge'
+  return 'Browser'
 }
 
 // Icons
-function LinkIcon() {
-  return (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-    </svg>
-  )
-}
-
 function ClickIcon() {
   return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
     </svg>
   )
 }
 
-function TrophyIcon() {
+function ChartIcon() {
   return (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+    <svg className="w-12 h-12 mx-auto text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
     </svg>
   )
 }
@@ -217,6 +359,15 @@ function ArrowLeftIcon() {
   return (
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+    </svg>
+  )
+}
+
+function SpinnerIcon() {
+  return (
+    <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
     </svg>
   )
 }

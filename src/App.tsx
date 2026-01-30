@@ -23,7 +23,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             </Link>
             <Link
               to="/stats"
-              className={`nav-link font-mono text-sm ${location.pathname === '/stats' ? 'active text-[var(--primary-purple)]' : 'text-[var(--text-secondary)]'}`}
+              className={`nav-link font-mono text-sm ${location.pathname.startsWith('/stats') ? 'active text-[var(--primary-purple)]' : 'text-[var(--text-secondary)]'}`}
             >
               Statistics
             </Link>
@@ -53,6 +53,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/stats" element={<Stats />} />
+          <Route path="/stats/:code" element={<Stats />} />
         </Routes>
       </Layout>
     </BrowserRouter>
