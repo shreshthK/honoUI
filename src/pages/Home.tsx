@@ -15,6 +15,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
+  const shortUrlBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -51,11 +52,20 @@ export default function Home() {
 
   const copyToClipboard = async () => {
     if (shortenedUrl) {
-      await navigator.clipboard.writeText(shortenedUrl.shortUrl)
+      const shortLink = shortUrlBase
+        ? `${shortUrlBase}/${shortenedUrl.code}`
+        : shortenedUrl.shortUrl
+      await navigator.clipboard.writeText(shortLink)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
   }
+
+  const shortLink = shortenedUrl
+    ? shortUrlBase
+      ? `${shortUrlBase}/${shortenedUrl.code}`
+      : shortenedUrl.shortUrl
+    : ''
 
   return (
     <div className="page-enter">
@@ -132,7 +142,7 @@ export default function Home() {
                     <CheckIcon />
                   </span>
                   <span className="font-mono text-lg md:text-xl text-[var(--text-primary)]">
-                    <span className="text-[var(--primary-pink)] font-bold">{shortenedUrl.shortUrl}</span>
+                  <span className="text-[var(--primary-pink)] font-bold">{shortLink}</span>
                   </span>
                 </div>
                 <button
