@@ -1,0 +1,11 @@
+services:
+  honoui:
+    container_name: honoui
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+    ports:
+      - "${VITE_PORT:-3000}:80"
+    restart: unless-stopped
